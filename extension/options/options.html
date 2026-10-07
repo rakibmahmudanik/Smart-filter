@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Smart Filler - Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Smart Filler Configuration</h1>
+        <p class="subtitle">
+          Customize operation modes, AI providers, and automated filling
+          personas.
+        </p>
+      </header>
+
+      <div class="card">
+        <h2>Operating Mode</h2>
+        <div class="radio-group">
+          <label>
+            <input type="radio" name="mode" value="proxy_mode" id="modeProxy" />
+            <strong>Proxy Mode (Recommended)</strong>
+            <p>
+              Calls your backend (Local or Vercel). Your Groq API key is guarded
+              safely on the server.
+            </p>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="mode"
+              value="direct_mode"
+              id="modeDirect"
+            />
+            <strong>Direct Mode (Standalone / BYOK)</strong>
+            <p>
+              Extension calls Groq API directly from the browser. No server
+              required.
+            </p>
+          </label>
+        </div>
+      </div>
+
+      <!-- Proxy Settings -->
+      <div id="proxySection" class="card">
+        <h2>Backend Proxy Settings</h2>
+        <div class="field">
+          <label for="serverUrl">Backend Server URL</label>
+          <input
+            type="text"
+            id="serverUrl"
+            placeholder="http://localhost:3000 or https://your-app.vercel.app"
+          />
+        </div>
+        <div class="field">
+          <label for="serverToken"
+            >Extension Secret Token (X-Extension-Token)</label
+          >
+          <input
+            type="password"
+            id="serverToken"
+            placeholder="Matches EXTENSION_TOKEN in your backend .env"
+          />
+        </div>
+        <button id="testProxyBtn" class="btn btn-secondary">
+          Test Backend Connection
+        </button>
+        <span id="proxyTestResult" class="test-feedback"></span>
+      </div>
+
+      <!-- Direct Settings -->
+      <div id="directSection" class="card hidden">
+        <h2>Direct Groq Settings</h2>
+        <div class="warning-banner">
+          ⚠️ <strong>Security Note:</strong> Your Groq API key is stored locally
+          in Chrome storage. Use Proxy Mode if you publish this extension.
+        </div>
+        <div class="field">
+          <label for="directKey">Groq API Key</label>
+          <div class="input-with-action">
+            <input type="password" id="directKey" placeholder="gsk_..." />
+            <button type="button" id="toggleDirectKeyBtn" class="btn-sm">
+              Show
+            </button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="directModel">Model</label>
+          <input type="text" id="directModel" value="llama-3.3-70b-versatile" />
+        </div>
+        <button id="testDirectBtn" class="btn btn-secondary">
+          Test Groq API Key
+        </button>
+        <span id="directTestResult" class="test-feedback"></span>
+      </div>
+
+      <!-- Personas Manager -->
+      <div class="card">
+        <div class="persona-header">
+          <h2>Persona Manager</h2>
+          <button id="newPersonaBtn" class="btn btn-primary btn-sm">
+            + Add Persona
+          </button>
+        </div>
+        <p class="subtitle">
+          Save profiles to populate forms with consistent biographical and
+          business info.
+        </p>
+
+        <div id="personaList" class="persona-list"></div>
+
+        <!-- Persona Modal Form -->
+        <div id="personaModal" class="modal hidden">
+          <div class="modal-content">
+            <h3 id="modalTitle">Add New Persona</h3>
+            <div class="modal-grid">
+              <input type="hidden" id="p_id" />
+              <div class="field">
+                <label>Persona Label</label
+                ><input
+                  type="text"
+                  id="p_name"
+                  placeholder="e.g. Work Profile"
+                />
+              </div>
+              <div class="field">
+                <label>Full Name</label
+                ><input
+                  type="text"
+                  id="p_fullName"
+                  placeholder="e.g. Rakib Mahmud"
+                />
+              </div>
+              <div class="field">
+                <label>Email</label
+                ><input
+                  type="email"
+                  id="p_email"
+                  placeholder="e.g. rakib@example.com"
+                />
+              </div>
+              <div class="field">
+                <label>Phone</label
+                ><input
+                  type="text"
+                  id="p_phone"
+                  placeholder="e.g. +8801700000000"
+                />
+              </div>
+              <div class="field">
+                <label>Job Title</label
+                ><input
+                  type="text"
+                  id="p_job"
+                  placeholder="e.g. Frontend Engineer"
+                />
+              </div>
+              <div class="field">
+                <label>Company</label
+                ><input
+                  type="text"
+                  id="p_company"
+                  placeholder="e.g. Tech Innovations Ltd"
+                />
+              </div>
+              <div class="field">
+                <label>Country</label
+                ><input
+                  type="text"
+                  id="p_country"
+                  placeholder="e.g. Bangladesh"
+                />
+              </div>
+              <div class="field">
+                <label>City</label
+                ><input type="text" id="p_city" placeholder="e.g. Dhaka" />
+              </div>
+              <div class="field full">
+                <label>Address</label
+                ><input
+                  type="text"
+                  id="p_address"
+                  placeholder="e.g. Mirpur, Dhaka-1216"
+                />
+              </div>
+              <div class="field full">
+                <label>Website / Portfolio</label
+                ><input
+                  type="text"
+                  id="p_website"
+                  placeholder="https://example.com"
+                />
+              </div>
+              <div class="field full">
+                <label>Short Bio</label
+                ><textarea
+                  id="p_bio"
+                  rows="2"
+                  placeholder="Passionate developer specializing in web experiences."
+                ></textarea>
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button id="savePersonaBtn" class="btn btn-primary">
+                Save Persona
+              </button>
+              <button id="closeModalBtn" class="btn btn-secondary">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="save-footer">
+        <button id="saveAllBtn" class="btn btn-primary">
+          Save All Settings
+        </button>
+        <span id="saveStatus" class="save-status"></span>
+      </div>
+    </div>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

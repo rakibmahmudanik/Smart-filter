@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Smart Filler</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="header">
+      <div class="brand">
+        <span class="logo">⚡</span>
+        <h1>Smart Filler</h1>
+      </div>
+      <a href="#" id="settingsLink" class="settings-icon" title="Open Settings"
+        >⚙️</a
+      >
+    </div>
+
+    <div id="firstRunNotice" class="first-run-box hidden">
+      <strong>Privacy Notice:</strong> Field labels & page title are analyzed
+      via AI to populate realistic values. Passwords & sensitive inputs are
+      strictly skipped.
+      <button id="dismissNoticeBtn">Got it</button>
+    </div>
+
+    <div class="form-group">
+      <label for="hintInput">Context hint (optional)</label>
+      <textarea
+        id="hintInput"
+        placeholder="e.g. This is a job application for a Frontend Developer"
+        rows="2"
+      ></textarea>
+    </div>
+
+    <div class="grid-row">
+      <div class="form-group">
+        <label for="languageSelect">Language</label>
+        <select id="languageSelect">
+          <option value="en">English</option>
+          <option value="bn">বাংলা (Bengali)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="scopeSelect">Scope</label>
+        <select id="scopeSelect">
+          <option value="empty_only">Empty fields</option>
+          <option value="overwrite">Overwrite all</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="personaSelect">Persona</label>
+      <select id="personaSelect">
+        <option value="none">None (Invent context)</option>
+      </select>
+    </div>
+
+    <div class="actions">
+      <button id="fillBtn" class="btn btn-primary">
+        <span id="btnSpinner" class="spinner hidden"></span>
+        <span id="btnText">Fill this form</span>
+      </button>
+      <button id="undoBtn" class="btn btn-secondary">Undo</button>
+    </div>
+
+    <div id="statusArea" class="status idle">Ready to fill</div>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

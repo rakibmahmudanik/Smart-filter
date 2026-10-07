@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>React Synthetic Event Test Form</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 600px;
+        margin: 40px auto;
+        padding: 20px;
+      }
+      .box {
+        background: #f3f4f6;
+        padding: 15px;
+        border-radius: 6px;
+        margin-top: 15px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState } = React;
+
+      function FeedbackForm() {
+        const [formData, setFormData] = useState({
+          name: "",
+          feedback: "",
+          rating: "5",
+        });
+
+        return (
+          <div>
+            <h2>Client Feedback Form (React Controlled)</h2>
+            <div style={{ marginBottom: 12 }}>
+              <label>Name:</label>
+              <input
+                type="text"
+                value={formData.name}
+                onChange={(e) =>
+                  setFormData({ ...formData, name: e.target.value })
+                }
+                style={{ width: "100%", padding: 8 }}
+              />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label>Detailed Feedback:</label>
+              <textarea
+                value={formData.feedback}
+                onChange={(e) =>
+                  setFormData({ ...formData, feedback: e.target.value })
+                }
+                style={{ width: "100%", padding: 8 }}
+              />
+            </div>
+            <div className="box">
+              <strong>Live React State Tracker:</strong>
+              <p>Name State: {formData.name || "<i>empty</i>"}</p>
+              <p>Feedback State: {formData.feedback || "<i>empty</i>"}</p>
+            </div>
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(
+        <FeedbackForm />,
+      );
+    </script>
+  </body>
+</html>

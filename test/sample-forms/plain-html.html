@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Job Application - Tech Innovations</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 600px;
+        margin: 40px auto;
+        padding: 20px;
+        line-height: 1.5;
+      }
+      .form-group {
+        margin-bottom: 16px;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      input,
+      select,
+      textarea {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        box-sizing: border-box;
+      }
+      .inline-group {
+        display: flex;
+        gap: 16px;
+      }
+      .inline-group label {
+        font-weight: normal;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Job Application: Senior Frontend Developer</h1>
+    <p>Fill out the required candidate information below.</p>
+
+    <form action="/submit-application" method="POST">
+      <div class="form-group">
+        <label for="fullName">Full Name</label>
+        <input type="text" id="fullName" name="fullName" required />
+      </div>
+
+      <div class="form-group">
+        <label for="email">Email Address</label>
+        <input type="email" id="email" name="email" required />
+      </div>
+
+      <div class="form-group">
+        <label for="phone">Phone Number</label>
+        <input type="tel" id="phone" name="phone" />
+      </div>
+
+      <div class="form-group">
+        <label for="experience">Years of Experience</label>
+        <select id="experience" name="experience">
+          <option value="">Select experience</option>
+          <option value="1-2">1 - 2 Years</option>
+          <option value="3-5">3 - 5 Years</option>
+          <option value="5+">5+ Years</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Work Preference</label>
+        <div class="inline-group">
+          <label
+            ><input type="radio" name="workPref" value="Remote" /> Remote</label
+          >
+          <label
+            ><input type="radio" name="workPref" value="Hybrid" /> Hybrid</label
+          >
+          <label
+            ><input type="radio" name="workPref" value="Onsite" /> Onsite</label
+          >
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="coverLetter">Why are you a good fit for this role?</label>
+        <textarea id="coverLetter" name="coverLetter" rows="4"></textarea>
+      </div>
+
+      <!-- Sensitive field that MUST be ignored by SmartFill -->
+      <div class="form-group">
+        <label for="securityPin">Secret Security PIN (Must be untouched)</label>
+        <input type="password" id="securityPin" name="securityPin" />
+      </div>
+
+      <button
+        type="button"
+        style="
+          padding: 10px 20px;
+          background: #2563eb;
+          color: #fff;
+          border: none;
+          border-radius: 4px;
+        "
+      >
+        Submit
+      </button>
+    </form>
+  </body>
+</html>
