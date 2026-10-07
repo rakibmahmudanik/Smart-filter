@@ -1,4 +1,4 @@
-# SmartFill AI ⚡
+# SmartFill AI
 
 SmartFill AI is an intelligent Chrome extension that inspects web forms and populates every field with context-aware, cohesive, and realistic test data.
 
