@@ -43,12 +43,28 @@ export async function getSettings() {
 }
 
 export async function saveSettings(partialSettings) {
+  const keyMap = {
+    mode: STORAGE_KEYS.OPERATING_MODE,
+    serverUrl: STORAGE_KEYS.SERVER_URL,
+    extensionToken: STORAGE_KEYS.EXTENSION_TOKEN,
+    directApiKey: STORAGE_KEYS.DIRECT_API_KEY,
+    directModel: STORAGE_KEYS.DIRECT_MODEL,
+    language: STORAGE_KEYS.DEFAULT_LANGUAGE,
+    personas: STORAGE_KEYS.SAVED_PERSONAS,
+    selectedPersonaId: STORAGE_KEYS.SELECTED_PERSONA_ID,
+    scope: STORAGE_KEYS.FILL_SCOPE,
+    lastHint: STORAGE_KEYS.LAST_HINT,
+    firstRunNoticed: STORAGE_KEYS.FIRST_RUN_NOTICED,
+  };
+
   const payload = {};
   for (const [key, val] of Object.entries(partialSettings)) {
-    if (STORAGE_KEYS[key]) {
-      payload[STORAGE_KEYS[key]] = val;
+    const storageKey = keyMap[key] || STORAGE_KEYS[key];
+    if (storageKey) {
+      payload[storageKey] = val;
     }
   }
+
   return new Promise((resolve) => {
     chrome.storage.local.set(payload, resolve);
   });

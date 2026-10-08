@@ -8,67 +8,54 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-let resolvedModel = null;
+let resolvedModel = process.env.MODEL || null;
+let modelPromise = null;
 
 async function getWorkingModel() {
   if (resolvedModel) return resolvedModel;
+  if (modelPromise) return modelPromise;
 
-  try {
-    const modelList = await groq.models.list();
-    const activeModels = modelList.data.map((m) => m.id);
+  modelPromise = (async () => {
+    try {
+      const modelList = await groq.models.list();
+      const activeModels = new Set(modelList.data.map((m) => m.id));
 
-    // অগ্রাধিকারপ্রাপ্ত জনপ্রিয় ও ফ্রি চ্যাট মডেলগুলো
-    const preferredOrder = [
-      "llama-3.1-8b-instant",
-      "llama-3.3-70b-versatile",
-      "llama3-8b-8192",
-      "llama3-70b-8192",
-      "mixtral-8x7b-32768",
-      "gemma2-9b-it",
-    ];
+      const preferredOrder = [
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile",
+        "llama3-8b-8192",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it",
+      ];
 
-    for (const modelId of preferredOrder) {
-      if (activeModels.includes(modelId)) {
-        resolvedModel = modelId;
-        console.log(
-          `[Smart Filler] Active chat model selected: ${resolvedModel}`,
-        );
-        return resolvedModel;
+      for (const modelId of preferredOrder) {
+        if (activeModels.has(modelId)) {
+          resolvedModel = modelId;
+          return resolvedModel;
+        }
       }
-    }
 
-    // টার্মস রিকয়ার্ড, অডিও বা থার্ড পার্টি প্রিভিউ মডেল ফিল্টার আউট করা
-    const safeChatModel = activeModels.find(
-      (id) =>
-        !id.includes("whisper") &&
-        !id.includes("orpheus") &&
-        !id.includes("canopy") &&
-        !id.includes("guard") &&
-        !id.includes("vision") &&
-        !id.includes("distil") &&
-        (id.includes("llama") ||
-          id.includes("gemma") ||
-          id.includes("mixtral") ||
-          id.includes("qwen")),
-    );
-
-    if (safeChatModel) {
-      resolvedModel = safeChatModel;
-      console.log(
-        `[Smart Filler] Safe fallback model selected: ${resolvedModel}`,
+      const safeChatModel = [...activeModels].find(
+        (id) =>
+          !id.includes("whisper") &&
+          !id.includes("orpheus") &&
+          !id.includes("canopy") &&
+          !id.includes("guard") &&
+          !id.includes("vision") &&
+          !id.includes("distil") &&
+          (id.includes("llama") || id.includes("gemma") || id.includes("qwen")),
       );
+
+      resolvedModel = safeChatModel || "llama-3.1-8b-instant";
+      return resolvedModel;
+    } catch (err) {
+      console.error("[Smart Filler] Model fetch fallback:", err.message);
+      resolvedModel = "llama-3.1-8b-instant";
       return resolvedModel;
     }
-  } catch (err) {
-    console.error(
-      "[Smart Filler] Failed to query Groq model list:",
-      err.message,
-    );
-  }
+  })();
 
-  // শেষ নিরাপদ ডিফল্ট
-  resolvedModel = "llama-3.1-8b-instant";
-  return resolvedModel;
+  return modelPromise;
 }
 
 export async function generateFormData({
@@ -79,67 +66,53 @@ export async function generateFormData({
   fields,
 }) {
   const model = await getWorkingModel();
-  const isSingleField = fields.length === 1;
+  const isSingle = fields.length === 1;
 
-  const systemPrompt = isSingleField ? SYSTEM_PROMPT_FAST : SYSTEM_PROMPT;
-  const maxTokens = isSingleField ? 120 : 1024;
+  // Safe ceiling: Single field = 100, Multi-field = fields * 45 + 100 (JSON closing buffer)
+  const maxTokens = isSingle ? 100 : Math.min(fields.length * 45 + 100, 500);
 
-  const userPayload = isSingleField
-    ? {
-        language: language || "en",
-        field: {
-          key: fields[0].key,
-          label: fields[0].label,
-          type: fields[0].type,
-          tag: fields[0].tag,
-          placeholder: fields[0].placeholder || undefined,
-          options: fields[0].options?.slice(0, 20),
-        },
-      }
-    : {
-        language: language || "en",
-        hint: hint || null,
-        persona: persona || null,
-        pageContext,
-        fields: fields.map(
-          ({
-            key,
-            tag,
-            type,
-            label,
-            placeholder,
-            name,
-            autocomplete,
-            required,
-            maxLength,
-            min,
-            max,
-            pattern,
-            options,
-          }) => ({
-            key,
-            tag,
-            type,
-            label,
-            placeholder,
-            name,
-            autocomplete,
-            required,
-            maxLength,
-            min,
-            max,
-            pattern,
-            options: Array.isArray(options) ? options.slice(0, 40) : undefined,
-          }),
-        ),
-      };
+  let userPayload;
+
+  if (isSingle) {
+    const f = fields[0];
+    userPayload = {
+      lang: language === "bn" ? "bn" : undefined,
+      field: {
+        key: f.key,
+        label: f.label,
+        type: f.type,
+        options: f.options
+          ?.slice(0, 10)
+          .map((o) => (typeof o === "string" ? o : o.value || o.text)),
+      },
+    };
+  } else {
+    userPayload = {
+      lang: language === "bn" ? "bn" : undefined,
+      page: pageContext?.title ? pageContext.title.slice(0, 40) : undefined,
+      hint: hint || undefined,
+      persona: persona || undefined,
+      fields: fields.map((f) => ({
+        key: f.key,
+        label: f.label,
+        type: f.type,
+        max: f.maxLength || undefined,
+        opts: f.options
+          ?.slice(0, 10)
+          .map((o) => (typeof o === "string" ? o : o.value || o.text)),
+      })),
+    };
+  }
 
   const response = await groq.chat.completions.create({
     model,
-    temperature: 0.7,
+    temperature: 0.2,
     max_tokens: maxTokens,
     messages: [
-      { role: "system", content: systemPrompt },
+      {
+        role: "system",
+        content: isSingle ? SYSTEM_PROMPT_FAST : SYSTEM_PROMPT,
+      },
       { role: "user", content: JSON.stringify(userPayload) },
     ],
     response_format: { type: "json_object" },

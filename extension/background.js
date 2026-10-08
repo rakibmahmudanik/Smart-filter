@@ -1,28 +1,33 @@
 import { getSettings } from "./shared/storage.js";
 
 const DIRECT_GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
-const DIRECT_SYSTEM_PROMPT = `You are Smart Filler. Generate realistic mock form data in JSON. Return ONLY a valid JSON object mapping each field key to its value. No markdown, no preambles.`;
 
-// Setup Right-Click Context Menus
+// Ultra-lean Prompts (~80% token reduction)
+const SYSTEM_PROMPT = `Generate realistic mock web form data as strict JSON {"key":"value"}. Only return the JSON object, no explanation.`;
+const SYSTEM_PROMPT_FAST = `Return strictly a JSON object {"<key>":"<value>"} with a realistic mock value matching the field label and type.`;
+
+// Setup Right-Click Context Menus safely
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: "smartfill-root",
-    title: "Smart Filler ⚡",
-    contexts: ["editable", "page"],
-  });
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: "smartfill-root",
+      title: "Smart Filler ⚡",
+      contexts: ["editable", "page"],
+    });
 
-  chrome.contextMenus.create({
-    parentId: "smartfill-root",
-    id: "smartfill-this-input",
-    title: "Fill this input only (Save tokens)",
-    contexts: ["editable"],
-  });
+    chrome.contextMenus.create({
+      parentId: "smartfill-root",
+      id: "smartfill-this-input",
+      title: "Fill this input only (Save tokens)",
+      contexts: ["editable"],
+    });
 
-  chrome.contextMenus.create({
-    parentId: "smartfill-root",
-    id: "smartfill-this-form",
-    title: "Fill entire form",
-    contexts: ["editable", "page"],
+    chrome.contextMenus.create({
+      parentId: "smartfill-root",
+      id: "smartfill-this-form",
+      title: "Fill entire form",
+      contexts: ["editable", "page"],
+    });
   });
 });
 
@@ -55,13 +60,43 @@ async function fetchDirectGroq(payload, apiKey, model) {
     );
   }
 
-  const userContent = JSON.stringify({
-    language: payload.language,
-    hint: payload.hint,
-    persona: payload.persona,
-    pageContext: payload.pageContext,
-    fields: payload.fields,
-  });
+  const isSingle = payload.fields.length === 1;
+  const maxTokens = isSingle
+    ? 80
+    : Math.min(payload.fields.length * 40 + 80, 450);
+
+  // Slim Payload to minimize prompt tokens
+  const userContent = JSON.stringify(
+    isSingle
+      ? {
+          lang: payload.language === "bn" ? "bn" : undefined,
+          field: {
+            k: payload.fields[0].key,
+            l: payload.fields[0].label,
+            t: payload.fields[0].type,
+            opt: payload.fields[0].options
+              ?.slice(0, 10)
+              .map((o) => (typeof o === "string" ? o : o.value || o.text)),
+          },
+        }
+      : {
+          lang: payload.language === "bn" ? "bn" : undefined,
+          hint: payload.hint || undefined,
+          persona: payload.persona || undefined,
+          page: payload.pageContext?.title
+            ? payload.pageContext.title.slice(0, 40)
+            : undefined,
+          fields: payload.fields.map((f) => ({
+            k: f.key,
+            l: f.label,
+            t: f.type,
+            max: f.maxLength || undefined,
+            opt: f.options
+              ?.slice(0, 10)
+              .map((o) => (typeof o === "string" ? o : o.value || o.text)),
+          })),
+        },
+  );
 
   const response = await fetch(DIRECT_GROQ_ENDPOINT, {
     method: "POST",
@@ -70,12 +105,15 @@ async function fetchDirectGroq(payload, apiKey, model) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: model || "llama3-8b-8192",
-      temperature: 0.7,
-      max_tokens: 512,
+      model: model || "llama-3.1-8b-instant",
+      temperature: 0.2, // Ultra-fast and deterministic
+      max_tokens: maxTokens,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: DIRECT_SYSTEM_PROMPT },
+        {
+          role: "system",
+          content: isSingle ? SYSTEM_PROMPT_FAST : SYSTEM_PROMPT,
+        },
         { role: "user", content: userContent },
       ],
     }),
@@ -91,10 +129,17 @@ async function fetchDirectGroq(payload, apiKey, model) {
 
   const data = await response.json();
   const rawText = data.choices[0]?.message?.content || "{}";
-  return JSON.parse(rawText);
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText.trim());
+  } catch {
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+  }
+  return parsed;
 }
 
-// Reusable fill executor
+// Reusable fill executor with Local-Value merging
 async function executeFillProcess(tabId, singleTarget = false) {
   try {
     const scanRes = await chrome.tabs.sendMessage(tabId, {
@@ -102,37 +147,44 @@ async function executeFillProcess(tabId, singleTarget = false) {
       singleTarget,
     });
 
-    if (!scanRes || !scanRes.fields || !scanRes.fields.length) return;
+    if (!scanRes) return;
 
-    const settings = await getSettings();
-    const payload = {
-      language: settings.language,
-      hint: settings.lastHint,
-      persona: null,
-      pageContext: scanRes.pageContext,
-      fields: scanRes.fields,
-    };
+    let finalValues = { ...(scanRes.localValues || {}) };
 
-    let values;
-    if (settings.mode === "direct_mode") {
-      values = await fetchDirectGroq(
-        payload,
-        settings.directApiKey,
-        settings.directModel,
-      );
-    } else {
-      values = await fetchFromBackend(
-        payload,
-        settings.serverUrl,
-        settings.extensionToken,
-      );
+    // Fetch AI values ONLY if non-static fields exist
+    if (scanRes.fields && scanRes.fields.length > 0) {
+      const settings = await getSettings();
+      const payload = {
+        language: settings.language,
+        hint: settings.lastHint,
+        persona: null,
+        pageContext: scanRes.pageContext,
+        fields: scanRes.fields,
+      };
+
+      const aiValues =
+        settings.mode === "direct_mode"
+          ? await fetchDirectGroq(
+              payload,
+              settings.directApiKey,
+              settings.directModel,
+            )
+          : await fetchFromBackend(
+              payload,
+              settings.serverUrl,
+              settings.extensionToken,
+            );
+
+      finalValues = { ...finalValues, ...aiValues };
     }
 
-    await chrome.tabs.sendMessage(tabId, {
-      type: "APPLY_FILL",
-      values,
-      scope: "overwrite", // context menu click always fills the target
-    });
+    if (Object.keys(finalValues).length > 0) {
+      await chrome.tabs.sendMessage(tabId, {
+        type: "APPLY_FILL",
+        values: finalValues,
+        scope: "overwrite",
+      });
+    }
   } catch (err) {
     console.error("[Smart Filler Error]", err);
   }
@@ -140,8 +192,7 @@ async function executeFillProcess(tabId, singleTarget = false) {
 
 // Context Menu Click Listener
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (!tab || !tab.id) return;
-
+  if (!tab?.id) return;
   if (info.menuItemId === "smartfill-this-input") {
     executeFillProcess(tab.id, true);
   } else if (info.menuItemId === "smartfill-this-form") {
@@ -155,20 +206,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
       try {
         const settings = await getSettings();
-        let values;
+        let values = {};
 
-        if (settings.mode === "direct_mode") {
-          values = await fetchDirectGroq(
-            message.payload,
-            settings.directApiKey,
-            settings.directModel,
-          );
-        } else {
-          values = await fetchFromBackend(
-            message.payload,
-            settings.serverUrl,
-            settings.extensionToken,
-          );
+        if (message.payload.fields && message.payload.fields.length > 0) {
+          values =
+            settings.mode === "direct_mode"
+              ? await fetchDirectGroq(
+                  message.payload,
+                  settings.directApiKey,
+                  settings.directModel,
+                )
+              : await fetchFromBackend(
+                  message.payload,
+                  settings.serverUrl,
+                  settings.extensionToken,
+                );
         }
 
         sendResponse({ success: true, values });

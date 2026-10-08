@@ -4,8 +4,8 @@
   --text-main: #111827;
   --text-muted: #4b5563;
   --border-color: #e5e7eb;
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
+  --primary: #4a31ff;
+  --primary-hover: #3722d6;
   --danger: #ef4444;
 }
 
@@ -16,8 +16,8 @@
     --text-main: #f8fafc;
     --text-muted: #94a3b8;
     --border-color: #334155;
-    --primary: #3b82f6;
-    --primary-hover: #60a5fa;
+    --primary: #4a31ff;
+    --primary-hover: #3722d6;
   }
 }
 

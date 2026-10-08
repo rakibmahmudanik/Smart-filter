@@ -15,8 +15,8 @@ export const STORAGE_KEYS = {
 
 export const DEFAULT_CONFIG = {
   OPERATING_MODE: "proxy_mode",
-  SERVER_URL: "http://localhost:3000",
-  EXTENSION_TOKEN: "smartfill_secure_token_replace_with_random_string",
+  SERVER_URL: "https://smartfiller.vercel.app/",
+  EXTENSION_TOKEN: "smartfill_secret_2026_rakib",
   DIRECT_MODEL: "llama-3.1-8b-instant",
   DEFAULT_LANGUAGE: "en",
   FILL_SCOPE: "empty_only",
