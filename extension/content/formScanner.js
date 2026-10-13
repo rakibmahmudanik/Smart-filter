@@ -1,16 +1,18 @@
 (() => {
   const SENSITIVE_KEYWORDS =
     /password|passwd|passcode|cvv|cvc|creditcard|cardnum|otp|token|ssn|secret|pin/i;
-  let lastRightClickedElement = null;
 
-  // Track the right-clicked element
-  document.addEventListener(
-    "contextmenu",
-    (event) => {
-      lastRightClickedElement = event.target;
-    },
-    true,
-  );
+  // Track the right-clicked element globally so script updates never lose the reference
+  if (!window.__smartFillContextMenuBound) {
+    window.__smartFillContextMenuBound = true;
+    document.addEventListener(
+      "contextmenu",
+      (event) => {
+        window.__smartFillLastRightClicked = event.target;
+      },
+      true,
+    );
+  }
 
   function isVisible(el) {
     const style = window.getComputedStyle(el);
@@ -30,6 +32,39 @@
       .replace(/([A-Z])/g, " $1")
       .replace(/[_-]/g, " ")
       .trim();
+  }
+
+  function cleanPlaceholderText(raw) {
+    if (!raw) return "";
+    const trimmed = raw.trim();
+
+    // Check if placeholder is purely an example like "e.g. Rakib Mahmud" or "Ex: Dhaka"
+    const pureExampleMatch = trimmed.match(
+      /^(?:e\.?g\.?|ex|example|for example|যেমন)[:.,\s-]+(.+)$/i,
+    );
+    if (pureExampleMatch) {
+      const sample = pureExampleMatch[1].trim();
+      if (sample.includes("@")) return "Email Address";
+      if (/^\+?[\d\s()-]{7,}$/.test(sample)) return "Phone Number";
+      if (/^https?:\/\//i.test(sample)) return "Website URL";
+      return `Value similar to '${sample}' (generate a different one)`;
+    }
+
+    // Remove inline example suffixes like "Full Name (e.g. John Doe)"
+    const cleaned = trimmed
+      .replace(/\(?\b(e\.?g\.?|ex|example|for example|যেমন)\b[:.,\s-]*[^)]*\)?/gi, "")
+      .replace(/^(enter|type|input|write|provide)\s+(your\s+|a\s+|the\s+)?/i, "")
+      .replace(/\.{2,}$/, "")
+      .trim();
+
+    return cleaned || trimmed;
+  }
+
+  function isMeaningfulIdentifier(str) {
+    if (!str || str.length < 2 || str.length > 40) return false;
+    if (/^[0-9_-]+$/.test(str)) return false;
+    if (/^(input|field|text|el|item|id|f)[\d_-]*$/i.test(str)) return false;
+    return /[a-zA-Z]{2,}/.test(str);
   }
 
   function resolveLabel(el) {
@@ -61,13 +96,49 @@
     const ariaLabel = el.getAttribute("aria-label");
     if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
 
-    if (el.placeholder && el.placeholder.trim()) return el.placeholder.trim();
+    // Check previous sibling label/span or parent wrapper's previous sibling
+    const prev =
+      el.previousElementSibling || el.parentElement?.previousElementSibling;
+    if (
+      prev &&
+      ["LABEL", "SPAN", "STRONG", "B", "P", "DIV"].includes(prev.tagName) &&
+      !prev.querySelector("input, select, textarea") &&
+      prev.innerText.trim() &&
+      prev.innerText.trim().length <= 60
+    ) {
+      return prev.innerText.trim();
+    }
+
+    // Walk up 3 parent levels to find a single field container with a <label>
+    let parent = el.parentElement;
+    for (let depth = 0; depth < 3 && parent && parent !== document.body; depth++) {
+      const inputsInParent = parent.querySelectorAll(
+        "input:not([type='hidden']), select, textarea",
+      );
+      if (inputsInParent.length === 1) {
+        const groupLabel = parent.querySelector("label");
+        if (groupLabel && groupLabel.innerText.trim()) {
+          return groupLabel.innerText.trim();
+        }
+      }
+      parent = parent.parentElement;
+    }
+
+    // Prefer semantic name or id (e.g. name="fullName", id="p_fullName") before placeholder
+    if (isMeaningfulIdentifier(el.name)) return humanizeName(el.name);
+    if (isMeaningfulIdentifier(el.id)) {
+      const strippedId = el.id.replace(/^(p_|input_|txt_|fld_|field_)/i, "");
+      return humanizeName(strippedId || el.id);
+    }
+
     if (el.title && el.title.trim()) return el.title.trim();
 
-    if (el.name) return humanizeName(el.name);
-    if (el.id) return humanizeName(el.id);
+    if (el.placeholder && el.placeholder.trim()) {
+      const cleanedPh = cleanPlaceholderText(el.placeholder);
+      if (cleanedPh) return cleanedPh;
+    }
 
-    return "Field";
+    return el.type && el.type !== "text" ? humanizeName(el.type) : "Field";
   }
 
   function isSensitive(el) {
@@ -106,13 +177,18 @@
     scan(singleTarget = false) {
       const pageContext = getPageContext();
 
+      // Always clear any previous data-smartfill-key attributes across the entire page first
+      document
+        .querySelectorAll("[data-smartfill-key]")
+        .forEach((node) => node.removeAttribute("data-smartfill-key"));
+
       // If singleTarget is requested via context menu
-      if (singleTarget && lastRightClickedElement) {
-        const el = lastRightClickedElement;
-        const tag = el.tagName ? el.tagName.toLowerCase() : "";
+      if (singleTarget) {
+        const el = window.__smartFillLastRightClicked || document.activeElement;
+        const tag = el?.tagName ? el.tagName.toLowerCase() : "";
         if (["input", "textarea", "select"].includes(tag) && !isSensitive(el)) {
-          const key = "f_single_0";
-          el.dataset.smartfillKey = key;
+          const key = `f_single_${Date.now()}`;
+          el.setAttribute("data-smartfill-key", key);
           let options = null;
           if (tag === "select") {
             options = Array.from(el.options)

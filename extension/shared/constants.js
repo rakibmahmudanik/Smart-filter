@@ -19,7 +19,7 @@ export const DEFAULT_CONFIG = {
   EXTENSION_TOKEN: "smartfill_secret_2026_rakib",
   DIRECT_MODEL: "llama-3.1-8b-instant",
   DEFAULT_LANGUAGE: "en",
-  FILL_SCOPE: "empty_only",
+  FILL_SCOPE: "overwrite",
 };
 
 export const MESSAGE_TYPES = {
@@ -31,4 +31,5 @@ export const MESSAGE_TYPES = {
   APPLY_RESULT: "APPLY_RESULT",
   UNDO_FILL: "UNDO_FILL",
   UNDO_RESULT: "UNDO_RESULT",
+  TEST_DIRECT_GROQ: "TEST_DIRECT_GROQ",
 };

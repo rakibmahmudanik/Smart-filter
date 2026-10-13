@@ -110,8 +110,24 @@ async function load() {
   renderPersonas();
 }
 
-modeProxy.addEventListener("change", () => renderMode("proxy_mode"));
-modeDirect.addEventListener("change", () => renderMode("direct_mode"));
+function cleanApiKey(rawKey) {
+  if (!rawKey || typeof rawKey !== "string") return "";
+  return rawKey
+    .trim()
+    .replace(/^Bearer\s+/i, "")
+    .replace(/^GROQ_API_KEY\s*=\s*/i, "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .trim();
+}
+
+modeProxy.addEventListener("change", () => {
+  renderMode("proxy_mode");
+  saveSettings({ OPERATING_MODE: "proxy_mode" });
+});
+modeDirect.addEventListener("change", () => {
+  renderMode("direct_mode");
+  saveSettings({ OPERATING_MODE: "direct_mode" });
+});
 
 toggleDirectKeyBtn.addEventListener("click", () => {
   if (directKeyInput.type === "password") {
@@ -147,29 +163,76 @@ testProxyBtn.addEventListener("click", async () => {
 
 // Test Direct Groq Key
 testDirectBtn.addEventListener("click", async () => {
-  directTestResult.textContent = "Validating key...";
+  const cleanedKey = cleanApiKey(directKeyInput.value);
+  directKeyInput.value = cleanedKey;
+
+  if (!cleanedKey) {
+    directTestResult.textContent = "Please enter a Groq API Key (gsk_...).";
+    directTestResult.style.color = "#ef4444";
+    return;
+  }
+
+  directTestResult.textContent = "Validating key & checking models...";
   directTestResult.style.color = "var(--text-muted)";
+
   try {
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${directKeyInput.value.trim()}`,
-      },
-      body: JSON.stringify({
-        model: directModelInput.value.trim() || "llama-3.3-70b-versatile",
-        messages: [{ role: "user", content: "Say OK" }],
-        max_tokens: 5,
-      }),
-    });
-    if (res.ok) {
-      directTestResult.textContent = "Groq API Key is valid and active!";
+    const requestedModel = directModelInput.value.trim() || "llama-3.1-8b-instant";
+    const bgRes = await chrome.runtime
+      .sendMessage({
+        type: "TEST_DIRECT_GROQ",
+        apiKey: cleanedKey,
+        model: requestedModel,
+      })
+      .catch(() => null);
+
+    if (bgRes) {
+      if (!bgRes.success) {
+        throw new Error(bgRes.error || "Invalid API key.");
+      }
+      if (bgRes.model) {
+        directModelInput.value = bgRes.model;
+      }
+      directTestResult.textContent = `Groq API Key is valid & saved! Active model: ${bgRes.model}`;
       directTestResult.style.color = "#10b981";
-    } else {
-      throw new Error();
+      return;
     }
-  } catch {
-    directTestResult.textContent = "Invalid API key or network error.";
+
+    // Fallback direct check via /openai/v1/models if background worker wasn't reachable
+    const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${cleanedKey}`,
+      },
+    });
+
+    if (!modelsRes.ok) {
+      const errData = await modelsRes.json().catch(() => ({}));
+      throw new Error(
+        errData.error?.message ||
+          `Invalid API key (HTTP ${modelsRes.status})`,
+      );
+    }
+
+    const modelsData = await modelsRes.json();
+    const activeIds = new Set((modelsData.data || []).map((m) => m.id));
+    const resolvedModel = activeIds.has(requestedModel)
+      ? requestedModel
+      : activeIds.has("llama-3.3-70b-versatile")
+        ? "llama-3.3-70b-versatile"
+        : "llama-3.1-8b-instant";
+
+    directModelInput.value = resolvedModel;
+    await saveSettings({
+      OPERATING_MODE: "direct_mode",
+      DIRECT_API_KEY: cleanedKey,
+      DIRECT_MODEL: resolvedModel,
+    });
+
+    directTestResult.textContent = `Groq API Key is valid & saved! Active model: ${resolvedModel}`;
+    directTestResult.style.color = "#10b981";
+  } catch (err) {
+    directTestResult.textContent =
+      err.message || "Invalid API key or network error.";
     directTestResult.style.color = "#ef4444";
   }
 });
@@ -222,11 +285,13 @@ savePersonaBtn.addEventListener("click", () => {
 
 saveAllBtn.addEventListener("click", async () => {
   const mode = modeDirect.checked ? "direct_mode" : "proxy_mode";
+  const cleanedKey = cleanApiKey(directKeyInput.value);
+  directKeyInput.value = cleanedKey;
   await saveSettings({
     OPERATING_MODE: mode,
     SERVER_URL: serverUrlInput.value.trim(),
     EXTENSION_TOKEN: serverTokenInput.value.trim(),
-    DIRECT_API_KEY: directKeyInput.value.trim(),
+    DIRECT_API_KEY: cleanedKey,
     DIRECT_MODEL: directModelInput.value.trim(),
     SAVED_PERSONAS: personas,
   });

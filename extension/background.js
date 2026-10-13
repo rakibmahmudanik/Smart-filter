@@ -1,13 +1,245 @@
-import { getSettings } from "./shared/storage.js";
+import { getSettings, saveSettings } from "./shared/storage.js";
 
 const DIRECT_GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
+const DIRECT_GROQ_MODELS_ENDPOINT = "https://api.groq.com/openai/v1/models";
 
-// Ultra-lean Prompts (~80% token reduction)
-const SYSTEM_PROMPT = `Generate realistic mock web form data as strict JSON {"key":"value"}. Only return the JSON object, no explanation.`;
-const SYSTEM_PROMPT_FAST = `Return strictly a JSON object {"<key>":"<value>"} with a realistic mock value matching the field label and type.`;
+// Ultra-lean Prompts to minimize prompt token consumption & forbid copying placeholders
+const SYSTEM_PROMPT = `Return ONLY a JSON object {"<key>":"<value>"} mapping each field "key" to realistic mock data. Use "seed" for a unique identity (unless "persona" is set). NEVER copy placeholder examples or field labels—invent a new realistic value. Follow "opts" for select/radio, "max" length, ISO dates, and "lang" ("bn"=Bengali text, Latin email/URL).`;
 
-// Setup Right-Click Context Menus safely
-chrome.runtime.onInstalled.addListener(() => {
+const SYSTEM_PROMPT_FAST = `Return ONLY a JSON object {"<key>":"<value>"} with a fresh realistic mock value matching "label", "type", "opts", and "seed". NEVER output the placeholder text, "avoid" text, or field label itself—invent a new realistic value.`;
+
+const VARIATION_POOL = [
+  "ux designer, Dhaka",
+  "software engineer, Sylhet",
+  "product manager, Chittagong",
+  "marketing lead, Rajshahi",
+  "data analyst, Khulna",
+  "startup founder, Barisal",
+  "cloud architect, Rangpur",
+  "fintech analyst, Mymensingh",
+  "medical researcher, Comilla",
+  "operations lead, Gazipur",
+  "creative director, Narayanganj",
+  "cybersecurity specialist, Bogra",
+];
+
+function getRandomSeedHint() {
+  const role =
+    VARIATION_POOL[Math.floor(Math.random() * VARIATION_POOL.length)];
+  const id = Math.floor(1000 + Math.random() * 9000);
+  return `${id}:${role}`;
+}
+
+function extractPlaceholderExample(ph) {
+  if (!ph) return "";
+  return ph
+    .replace(/^(?:e\.?g\.?|ex|example|for example|যেমন)[:.,\s-]+/i, "")
+    .trim();
+}
+
+function slimPersona(persona) {
+  if (!persona || typeof persona !== "object") return undefined;
+  const slim = {};
+  for (const [k, v] of Object.entries(persona)) {
+    if (k === "id" || k === "name") continue;
+    if (v !== undefined && v !== null && String(v).trim() !== "") {
+      slim[k] = String(v).trim().slice(0, 80);
+    }
+  }
+  return Object.keys(slim).length > 0 ? slim : undefined;
+}
+
+// Zero-token local matcher for Persona fields (skips sending matched fields to AI)
+function matchPersonaFieldsLocally(fields, persona) {
+  if (!persona || typeof persona !== "object") {
+    return { localValues: {}, remainingFields: fields };
+  }
+
+  const localValues = {};
+  const remainingFields = [];
+
+  for (const f of fields) {
+    if (f.options && f.options.length > 0) {
+      remainingFields.push(f);
+      continue;
+    }
+
+    const sig = `${f.label || ""} ${f.name || ""} ${f.id || ""} ${f.autocomplete || ""}`.toLowerCase();
+    let matched = null;
+
+    if ((f.type === "email" || /\be-?mail\b/.test(sig)) && persona.email) {
+      matched = persona.email;
+    } else if ((f.type === "tel" || /\b(phone|mobile|cell|contact no)\b/.test(sig)) && persona.phone) {
+      matched = persona.phone;
+    } else if ((f.type === "url" || /\b(website|portfolio|github|linkedin|url)\b/.test(sig)) && persona.website) {
+      matched = persona.website;
+    } else if (/\b(full\s*name|your\s*name|applicant\s*name|^name$)\b/.test(sig.trim()) && persona.fullName) {
+      matched = persona.fullName;
+    } else if (/\b(first\s*name|given\s*name|fname)\b/.test(sig) && persona.fullName) {
+      matched = persona.fullName.split(/\s+/)[0];
+    } else if (/\b(last\s*name|surname|family\s*name|lname)\b/.test(sig) && persona.fullName) {
+      const parts = persona.fullName.trim().split(/\s+/);
+      matched = parts.length > 1 ? parts.slice(1).join(" ") : parts[0];
+    } else if (/\b(company|organization|employer|workplace)\b/.test(sig) && persona.company) {
+      matched = persona.company;
+    } else if (/\b(job\s*title|designation|position|role|occupation)\b/.test(sig) && persona.job) {
+      matched = persona.job;
+    } else if (/\b(city|town|district)\b/.test(sig) && persona.city) {
+      matched = persona.city;
+    } else if (/\b(country|nation)\b/.test(sig) && persona.country) {
+      matched = persona.country;
+    } else if (/\b(street|address)\b/.test(sig) && persona.address) {
+      matched = persona.address;
+    } else if (/\b(bio|about\s*me|summary|profile)\b/.test(sig) && persona.bio) {
+      matched = persona.bio;
+    }
+
+    if (matched) {
+      localValues[f.key] = matched;
+    } else {
+      remainingFields.push(f);
+    }
+  }
+
+  return { localValues, remainingFields };
+}
+
+// 1-Minute In-Memory LRU Cache for Multi-Field forms (0 tokens for repeated fills within 60 seconds)
+const responseCache = new Map();
+const CACHE_TTL_MS = 60 * 1000; // 1 minute
+const MAX_CACHE_ENTRIES = 50;
+
+function getCacheKey(payload, mode) {
+  const fieldSig = (payload.fields || [])
+    .map((f) => `${f.key}:${f.label}:${f.type}`)
+    .join("|");
+  return `${mode}:${payload.language || "en"}:${payload.hint || ""}:${payload.persona?.id || "none"}:${fieldSig}`;
+}
+
+export function cleanApiKey(rawKey) {
+  if (!rawKey || typeof rawKey !== "string") return "";
+  return rawKey
+    .trim()
+    .replace(/^Bearer\s+/i, "")
+    .replace(/^GROQ_API_KEY\s*=\s*/i, "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .trim();
+}
+
+const modelCache = new Map();
+
+function isSafeChatModel(id) {
+  const lower = id.toLowerCase();
+  return (
+    !lower.includes("whisper") &&
+    !lower.includes("orpheus") &&
+    !lower.includes("canopy") &&
+    !lower.includes("guard") &&
+    !lower.includes("vision") &&
+    !lower.includes("distil") &&
+    !lower.includes("tts") &&
+    !lower.includes("playai") &&
+    !lower.includes("embed") &&
+    (lower.includes("llama") ||
+      lower.includes("gemma") ||
+      lower.includes("qwen") ||
+      lower.includes("mixtral") ||
+      lower.includes("deepseek"))
+  );
+}
+
+async function resolveDirectGroqModel(apiKey, preferredModel, forceRefresh = false) {
+  const cleanKey = cleanApiKey(apiKey);
+  const cleanPreferred = (preferredModel || "").trim();
+  const cacheKey = `${cleanKey.slice(-8)}:${cleanPreferred}`;
+
+  if (!forceRefresh && modelCache.has(cacheKey)) {
+    return modelCache.get(cacheKey);
+  }
+
+  const res = await fetch(DIRECT_GROQ_MODELS_ENDPOINT, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${cleanKey}`,
+    },
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    const msg =
+      errData.error?.message ||
+      (res.status === 401
+        ? "Invalid Groq API Key (Unauthorized). Please check your gsk_... key."
+        : `Groq API error (HTTP ${res.status})`);
+    throw new Error(msg);
+  }
+
+  const modelList = await res.json();
+  const activeModels = new Set((modelList.data || []).map((m) => m.id));
+
+  if (cleanPreferred && activeModels.has(cleanPreferred) && isSafeChatModel(cleanPreferred)) {
+    modelCache.set(cacheKey, cleanPreferred);
+    return cleanPreferred;
+  }
+
+  const preferredOrder = [
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+    "llama3-8b-8192",
+    "llama3-70b-8192",
+    "gemma2-9b-it",
+    "mixtral-8x7b-32768",
+  ];
+
+  for (const candidate of preferredOrder) {
+    if (activeModels.has(candidate)) {
+      modelCache.set(cacheKey, candidate);
+      return candidate;
+    }
+  }
+
+  const fallback = [...activeModels].find(isSafeChatModel) || "llama-3.1-8b-instant";
+  modelCache.set(cacheKey, fallback);
+  return fallback;
+}
+
+async function testDirectGroqKey(rawKey, preferredModel) {
+  const cleanKey = cleanApiKey(rawKey);
+  if (!cleanKey) {
+    throw new Error("Please enter a Groq API Key first.");
+  }
+
+  const workingModel = await resolveDirectGroqModel(cleanKey, preferredModel, true);
+
+  const res = await fetch(DIRECT_GROQ_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${cleanKey}`,
+    },
+    body: JSON.stringify({
+      model: workingModel,
+      messages: [{ role: "user", content: "OK" }],
+      max_tokens: 3,
+    }),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(
+      errData.error?.message || `Groq chat check failed (HTTP ${res.status})`,
+    );
+  }
+
+  return {
+    valid: true,
+    model: workingModel,
+    cleanKey,
+  };
+}
+
+// Setup Right-Click Context Menus & refresh content scripts on open tabs
+chrome.runtime.onInstalled.addListener(async () => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: "smartfill-root",
@@ -29,17 +261,59 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ["editable", "page"],
     });
   });
+
+  // Update content scripts in already-open tabs so user doesn't have to manually refresh tabs
+  try {
+    const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+    for (const tab of tabs) {
+      if (tab.id) {
+        chrome.scripting
+          .executeScript({
+            target: { tabId: tab.id },
+            files: [
+              "content/formScanner.js",
+              "content/formFiller.js",
+              "content/content.js",
+            ],
+          })
+          .catch(() => {});
+      }
+    }
+  } catch {
+    // Ignore restricted tabs
+  }
 });
 
 async function fetchFromBackend(payload, serverUrl, token) {
   const cleanUrl = serverUrl.replace(/\/+$/, "");
+  const seed = getRandomSeedHint();
+  const isSingle = payload.fields.length === 1;
+
+  // Ensure fresh generation after 1m cache expiry (or on single-field) and prevent placeholder copying
+  const outboundPayload = {
+    ...payload,
+    hint: payload.hint
+      ? `${payload.hint} [seed:${seed}]`.slice(0, 290)
+      : `Unique profile [seed:${seed}]; never copy placeholder examples.`,
+    fields: isSingle
+      ? payload.fields.map((f) => {
+          const avoidPh = extractPlaceholderExample(f.placeholder);
+          const avoidNote = avoidPh ? `, do NOT use '${avoidPh}'` : "";
+          return {
+            ...f,
+            label: `${f.label} (invent new random value [${seed}]${avoidNote})`,
+          };
+        })
+      : payload.fields,
+  };
+
   const response = await fetch(`${cleanUrl}/api/fill`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Extension-Token": token,
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(outboundPayload),
   });
 
   if (!response.ok) {
@@ -54,59 +328,73 @@ async function fetchFromBackend(payload, serverUrl, token) {
 }
 
 async function fetchDirectGroq(payload, apiKey, model) {
-  if (!apiKey) {
+  const cleanKey = cleanApiKey(apiKey);
+  if (!cleanKey) {
     throw new Error(
       "Groq API Key is missing. Open Settings to configure your key.",
     );
   }
 
+  const workingModel = await resolveDirectGroqModel(cleanKey, model);
   const isSingle = payload.fields.length === 1;
   const maxTokens = isSingle
     ? 80
-    : Math.min(payload.fields.length * 40 + 80, 450);
+    : Math.min(payload.fields.length * 40 + 80, 600);
 
-  // Slim Payload to minimize prompt tokens
-  const userContent = JSON.stringify(
-    isSingle
-      ? {
-          lang: payload.language === "bn" ? "bn" : undefined,
-          field: {
-            k: payload.fields[0].key,
-            l: payload.fields[0].label,
-            t: payload.fields[0].type,
-            opt: payload.fields[0].options
-              ?.slice(0, 10)
-              .map((o) => (typeof o === "string" ? o : o.value || o.text)),
-          },
-        }
-      : {
-          lang: payload.language === "bn" ? "bn" : undefined,
-          hint: payload.hint || undefined,
-          persona: payload.persona || undefined,
-          page: payload.pageContext?.title
-            ? payload.pageContext.title.slice(0, 40)
-            : undefined,
-          fields: payload.fields.map((f) => ({
-            k: f.key,
-            l: f.label,
-            t: f.type,
-            max: f.maxLength || undefined,
-            opt: f.options
-              ?.slice(0, 10)
-              .map((o) => (typeof o === "string" ? o : o.value || o.text)),
-          })),
-        },
-  );
+  const seed = getRandomSeedHint();
+  const cleanPersona = slimPersona(payload.persona);
+
+  let userPayload;
+  if (isSingle) {
+    const f = payload.fields[0];
+    const opts = f.options
+      ?.slice(0, 10)
+      .map((o) => (typeof o === "string" ? o : o.value || o.text));
+    const avoidPh = extractPlaceholderExample(f.placeholder);
+    userPayload = {
+      seed,
+      lang: payload.language === "bn" ? "bn" : undefined,
+      field: {
+        key: f.key,
+        label: f.label.slice(0, 50),
+        type: f.type !== "text" ? f.type : undefined,
+        avoid: avoidPh ? avoidPh.slice(0, 40) : undefined,
+        opts: opts?.length ? opts : undefined,
+      },
+    };
+  } else {
+    userPayload = {
+      seed: cleanPersona ? undefined : seed,
+      lang: payload.language === "bn" ? "bn" : undefined,
+      hint: payload.hint ? payload.hint.slice(0, 120) : undefined,
+      persona: cleanPersona,
+      page: payload.pageContext?.title
+        ? payload.pageContext.title.slice(0, 40)
+        : undefined,
+      fields: payload.fields.map((f) => {
+        const opts = f.options
+          ?.slice(0, 10)
+          .map((o) => (typeof o === "string" ? o : o.value || o.text));
+        return {
+          key: f.key,
+          label: f.label.slice(0, 50),
+          type: f.type !== "text" ? f.type : undefined,
+          max: f.maxLength > 0 && f.maxLength < 300 ? f.maxLength : undefined,
+          opts: opts?.length ? opts : undefined,
+        };
+      }),
+    };
+  }
 
   const response = await fetch(DIRECT_GROQ_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${cleanKey}`,
     },
     body: JSON.stringify({
-      model: model || "llama-3.1-8b-instant",
-      temperature: 0.2, // Ultra-fast and deterministic
+      model: workingModel,
+      temperature: 0.85,
       max_tokens: maxTokens,
       response_format: { type: "json_object" },
       messages: [
@@ -114,7 +402,7 @@ async function fetchDirectGroq(payload, apiKey, model) {
           role: "system",
           content: isSingle ? SYSTEM_PROMPT_FAST : SYSTEM_PROMPT,
         },
-        { role: "user", content: userContent },
+        { role: "user", content: JSON.stringify(userPayload) },
       ],
     }),
   });
@@ -139,6 +427,66 @@ async function fetchDirectGroq(payload, apiKey, model) {
   return parsed;
 }
 
+// Smart token-saving orchestrator: 1m cache for full forms + zero-token persona match + fresh single-field fill
+async function getSmartFillValues(payload, settings) {
+  if (!payload.fields || payload.fields.length === 0) {
+    return {};
+  }
+
+  const isSingleField = payload.fields.length === 1;
+  const cacheKey = isSingleField ? null : getCacheKey(payload, settings.mode);
+
+  // Use 1-minute cache ONLY for multi-field form fills (single-field always generates a fresh value)
+  if (!isSingleField && cacheKey) {
+    const cached = responseCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return cached.values;
+    }
+  }
+
+  // Match known Persona fields locally (0 tokens)
+  const { localValues, remainingFields } = matchPersonaFieldsLocally(
+    payload.fields,
+    payload.persona,
+  );
+
+  let aiValues = {};
+  if (remainingFields.length > 0) {
+    const reducedPayload = {
+      ...payload,
+      fields: remainingFields,
+    };
+
+    aiValues =
+      settings.mode === "direct_mode"
+        ? await fetchDirectGroq(
+            reducedPayload,
+            settings.directApiKey,
+            settings.directModel,
+          )
+        : await fetchFromBackend(
+            reducedPayload,
+            settings.serverUrl,
+            settings.extensionToken,
+          );
+  }
+
+  const combined = { ...localValues, ...aiValues };
+
+  if (!isSingleField && cacheKey) {
+    if (responseCache.size >= MAX_CACHE_ENTRIES) {
+      const firstKey = responseCache.keys().next().value;
+      responseCache.delete(firstKey);
+    }
+    responseCache.set(cacheKey, {
+      values: combined,
+      timestamp: Date.now(),
+    });
+  }
+
+  return combined;
+}
+
 // Reusable fill executor with Local-Value merging
 async function executeFillProcess(tabId, singleTarget = false) {
   try {
@@ -151,31 +499,30 @@ async function executeFillProcess(tabId, singleTarget = false) {
 
     let finalValues = { ...(scanRes.localValues || {}) };
 
-    // Fetch AI values ONLY if non-static fields exist
     if (scanRes.fields && scanRes.fields.length > 0) {
       const settings = await getSettings();
+      const activePersona =
+        (settings.personas || []).find(
+          (p) => p.id === settings.selectedPersonaId,
+        ) || null;
+
       const payload = {
         language: settings.language,
         hint: settings.lastHint,
-        persona: null,
+        persona: activePersona,
         pageContext: scanRes.pageContext,
         fields: scanRes.fields,
       };
 
-      const aiValues =
-        settings.mode === "direct_mode"
-          ? await fetchDirectGroq(
-              payload,
-              settings.directApiKey,
-              settings.directModel,
-            )
-          : await fetchFromBackend(
-              payload,
-              settings.serverUrl,
-              settings.extensionToken,
-            );
-
+      const aiValues = await getSmartFillValues(payload, settings);
       finalValues = { ...finalValues, ...aiValues };
+
+      if (singleTarget && scanRes.fields.length === 1) {
+        const targetKey = scanRes.fields[0].key;
+        const singleVal =
+          finalValues[targetKey] ?? Object.values(finalValues)[0];
+        finalValues = singleVal !== undefined ? { [targetKey]: singleVal } : {};
+      }
     }
 
     if (Object.keys(finalValues).length > 0) {
@@ -200,29 +547,34 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-// Popup Message Hub
+// Popup & Options Message Hub
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === "TEST_DIRECT_GROQ") {
+    (async () => {
+      try {
+        const result = await testDirectGroqKey(message.apiKey, message.model);
+        await saveSettings({
+          OPERATING_MODE: "direct_mode",
+          DIRECT_API_KEY: result.cleanKey,
+          DIRECT_MODEL: result.model,
+        });
+        sendResponse({
+          success: true,
+          model: result.model,
+          cleanKey: result.cleanKey,
+        });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === "GET_FILL_DATA") {
     (async () => {
       try {
         const settings = await getSettings();
-        let values = {};
-
-        if (message.payload.fields && message.payload.fields.length > 0) {
-          values =
-            settings.mode === "direct_mode"
-              ? await fetchDirectGroq(
-                  message.payload,
-                  settings.directApiKey,
-                  settings.directModel,
-                )
-              : await fetchFromBackend(
-                  message.payload,
-                  settings.serverUrl,
-                  settings.extensionToken,
-                );
-        }
-
+        const values = await getSmartFillValues(message.payload, settings);
         sendResponse({ success: true, values });
       } catch (err) {
         sendResponse({ success: false, error: err.message });

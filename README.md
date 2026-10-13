@@ -1,69 +1,57 @@
-# SmartFill AI ⚡ (Beta)
+# SmartFill AI ⚡
 
-SmartFill AI is an intelligent Chrome extension that fills out web forms (registration, job applications, feedback, and surveys) in just one click with realistic, context-aware mock data. No more typing repetitive test details manually.
-
----
-
-## ✨ Why Use SmartFill AI?
-
-- ⚡ **One-Click Form Filling:** Populate complete multi-step forms in less than a second.
-- 🎯 **Realistic & Consistent Data:** Matches names, emails, addresses, job titles, and dropdown choices logically.
-- 🖼️ **Real Image URLs:** Automatically inserts working free profile and avatar image links for photo inputs.
-- 🔒 **Privacy First:** Passwords, OTP codes, and credit card fields are completely ignored and never touched.
-- ↩️ **Instant Undo:** Accidentally filled a form? Revert back to the original values with a single click.
-- 🌐 **Multi-Language:** Supports both English and Bengali text generation.
+SmartFill AI is an intelligent Chrome extension that fills out web forms in one click with realistic, context-aware mock data. No more typing repetitive test details manually.
 
 ---
 
-## 🚀 How to Install (Takes 1 Minute)
+## 🚀 Quick Install (Takes 30 Seconds)
 
-1. Download the extension **ZIP file** and extract it on your computer.
-2. Open Google Chrome and go to `chrome://extensions` in the address bar.
-3. Turn **ON** the **Developer mode** toggle switch in the top-right corner.
-4. Click the **Load unpacked** button in the top-left corner.
-5. Select the extracted **`extension`** folder.
-6. Pin **SmartFill AI** to your Chrome toolbar for quick access.
+1. Open Chrome and navigate to `chrome://extensions`.
+2. Turn **ON** **Developer mode** in the top-right corner.
+3. Click **Load unpacked** (top-left) and select the **`extension`** folder.
+4. Pin **SmartFill AI** to your Chrome toolbar for quick access.
 
 ---
 
 ## 💡 How to Use
 
-### 1. Fill an Entire Form
+### 1. Fill an Entire Form (1-Click)
+- Click the **SmartFill AI** icon in your toolbar and click **⚡ Fill this form**.
+- **Shortcut:** Press `Ctrl + Shift + F` (Mac: `Cmd + Shift + F`).
 
-- Navigate to any webpage containing a form.
-- Click the **SmartFill AI** icon in your browser toolbar.
-- Click the **⚡ Fill this form** button (or press `Ctrl + Shift + F`).
-- Every field will be populated immediately.
+### 2. Fill Just One Input Field (Quick Fill)
+- **Right-click** inside any specific input box or textarea.
+- Select **Smart Filler ⚡ > Fill this input only**.
+- It will instantly generate a fresh value for that single field.
 
-### 2. Fill a Single Input Box (Quick Fill)
+### 3. Add Custom Hints (Optional)
+- Open the popup and enter a short description in the **Context hint** box:
+  - *"Graphic designer from Dhaka with 4 years experience"*
+  - *"Customer feedback with a 5-star rating"*
+- Click **Fill this form** to get data matching your description.
 
-- Right-click directly inside any specific text field you want to fill.
-- Select **Smart Filler ⚡ > Fill this input only** from the context menu.
+### 4. Use Saved Profiles / Personas (Optional)
+- Click the **Settings (⚙️)** icon in the popup.
+- Add your profile details (Name, Email, Job, City, etc.) under **Persona Manager**.
+- Select your persona from the popup dropdown before filling to autofill your details instantly with **0 token cost**.
 
-### 3. Provide Custom Context or Hints
-
-- Open the extension popup.
-- Enter a short description in the **Context / Intent Hint** field (e.g., _"Graphic designer from Dhaka with 4 years experience"_).
-- Click **Fill this form** to generate matching data tailored to your description.
-
-### 4. Restore Previous Data (Undo)
-
-- If you want to clear or restore previous form values, open the popup and click the **Undo (↺)** button.
-
----
-
-## ❓ Frequently Asked Questions (FAQ)
-
-**Q: Does it save my passwords or personal data?**
-
-> **No.** SmartFill AI does not collect, record, or track your personal information. Password and payment fields are completely skipped for safety.
-
-**Q: Do I need to run a local server or write code to use it?**
-
-> **No.** The extension connects directly to the pre-configured cloud server, so it works out of the box right after installation.
+### 5. Undo Changes
+- Want to clear or restore previous form values? Open the popup and click **Undo (↺)**.
 
 ---
 
-## 💬 Feedback & Support
+## ⚙️ Direct Mode (Using Your Own Groq API Key)
 
-SmartFill AI is currently in **Beta**. If you experience any issues or have feature suggestions, feel free to submit feedback or open an issue!
+SmartFill AI works out of the box, or you can use your own free Groq API key:
+
+1. Click the **Settings (⚙️)** icon in the popup.
+2. Select **Direct Mode (Standalone / BYOK)**.
+3. Paste your [Groq API Key](https://console.groq.com/keys) (`gsk_...`) and click **Test Groq API Key**.
+4. The extension will automatically verify the key, select an active model, and save your settings.
+
+---
+
+## 🔒 Privacy & Safety
+
+- **Passwords & Payment fields:** Passwords, PINs, OTP codes, and credit cards are strictly skipped and never touched.
+- **Privacy first:** SmartFill AI generates fictional test data and never collects or tracks your personal information.

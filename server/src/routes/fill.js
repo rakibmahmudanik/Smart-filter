@@ -6,17 +6,16 @@ import { generateFormData } from "../services/groq.js";
 
 export const fillRouter = Router();
 
-// Lightweight LRU In-Memory Cache (Stores last 50 identical queries for 5 minutes)
+// Lightweight LRU In-Memory Cache (Stores last 50 identical queries for 1 minute to save tokens)
 const responseCache = new Map();
-const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_TTL_MS = 60 * 1000; // 1 minute
 const MAX_CACHE_ENTRIES = 50;
 
 function generateCacheKey(data) {
-  // Create deterministic hash from relevant prompt fields
   const keyBasis = {
     lang: data.language,
-    hint: data.hint,
-    personaId: data.persona?.id,
+    hint: data.hint || "",
+    personaId: data.persona?.id || "",
     fields: data.fields.map((f) => `${f.key}:${f.label}:${f.type}`),
   };
   return crypto
@@ -31,19 +30,24 @@ fillRouter.post(
   validateFillPayload,
   async (req, res) => {
     const startTime = Date.now();
-    const cacheKey = generateCacheKey(req.validatedData);
-    const cached = responseCache.get(cacheKey);
+    const isSingleField = req.validatedData.fields.length === 1;
+    const cacheKey = isSingleField
+      ? null
+      : generateCacheKey(req.validatedData);
 
-    // 1. Instant Cache Hit (0 Tokens, ~1-2ms response)
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-      console.log(
-        `[CACHE HIT] Fields: ${req.validatedData.fields.length} | Time: ${Date.now() - startTime}ms | Tokens: 0`,
-      );
-      return res.json({ values: cached.values, cached: true });
+    // 1. Instant Cache Hit within 1 minute for multi-field forms (0 Tokens, ~1ms response)
+    if (!isSingleField && cacheKey) {
+      const cached = responseCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+        console.log(
+          `[CACHE HIT - 1m] Fields: ${req.validatedData.fields.length} | Time: ${Date.now() - startTime}ms | Tokens: 0`,
+        );
+        return res.json({ values: cached.values, cached: true });
+      }
     }
 
     try {
-      // 2. Fetch AI Generated Data
+      // 2. Fetch AI Generated Data (after 1 minute, on new form, or on single-field)
       const result = await generateFormData(req.validatedData);
       const duration = Date.now() - startTime;
 
@@ -51,17 +55,18 @@ fillRouter.post(
         `[FILL SUCCESS] Fields: ${req.validatedData.fields.length} | Time: ${duration}ms | Tokens: ${result.usage?.total_tokens || 0}`,
       );
 
-      // Save to cache
-      if (responseCache.size >= MAX_CACHE_ENTRIES) {
-        const firstKey = responseCache.keys().next().value;
-        responseCache.delete(firstKey);
+      // Save multi-field forms to 1-minute cache
+      if (!isSingleField && cacheKey) {
+        if (responseCache.size >= MAX_CACHE_ENTRIES) {
+          const firstKey = responseCache.keys().next().value;
+          responseCache.delete(firstKey);
+        }
+        responseCache.set(cacheKey, {
+          values: result.values,
+          timestamp: Date.now(),
+        });
       }
-      responseCache.set(cacheKey, {
-        values: result.values,
-        timestamp: Date.now(),
-      });
 
-      // Return only what extension actually consumes
       return res.json({
         values: result.values,
         usage: result.usage,

@@ -1,5 +1,8 @@
 // Content script entry: listens for messages and orchestrates scan + fill
 (() => {
+  if (window.__smartFillContentInitialized) return;
+  window.__smartFillContentInitialized = true;
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "SCAN_FORM") {
       const result = window.SmartFillScanner.scan(

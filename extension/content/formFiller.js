@@ -156,6 +156,10 @@
           } catch (err) {
             console.error("[SmartFill Fill Error]", err);
             failed++;
+          } finally {
+            if (key.startsWith("f_single")) {
+              el.removeAttribute("data-smartfill-key");
+            }
           }
         }
       }
