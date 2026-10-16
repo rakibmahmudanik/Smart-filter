@@ -19,10 +19,10 @@ SmartFill AI is an intelligent Chrome extension that fills out web forms in one 
 - Click the **SmartFill AI** icon in your toolbar and click **⚡ Fill this form**.
 - **Shortcut:** Press `Option + Shift + F` on Mac (`⌥ + ⇧ + F`) or `Ctrl + Shift + F` on Windows/Linux (can be customized at `chrome://extensions/shortcuts`).
 
-### 2. Fill Just One Input Field (Quick Fill)
-- **Right-click** inside any specific input box or textarea.
-- Select **Smart Filler ⚡ > Fill this input only**.
-- It will instantly generate a fresh value for that single field.
+### 2. Fill Just One Input Field (Quick Fill / Save Tokens)
+- **Shortcut:** Click/focus inside any input box and press `Option + Shift + I` on Mac (`⌥ + ⇧ + I`) or `Alt + Shift + I` on Windows/Linux.
+- **Or Right-click:** Right-click inside any specific input box and select **Smart Filler ⚡ > Fill this input only**.
+- It instantly generates a fresh, unique value for that specific field.
 
 ### 3. Add Custom Hints (Optional)
 - Open the popup and enter a short description in the **Context hint** box:

@@ -182,9 +182,17 @@
         .querySelectorAll("[data-smartfill-key]")
         .forEach((node) => node.removeAttribute("data-smartfill-key"));
 
-      // If singleTarget is requested via context menu
+      // If singleTarget is requested via keyboard shortcut or context menu
       if (singleTarget) {
-        const el = window.__smartFillLastRightClicked || document.activeElement;
+        const active = document.activeElement;
+        const activeTag = active?.tagName ? active.tagName.toLowerCase() : "";
+        const isFocusedInput =
+          ["input", "textarea", "select"].includes(activeTag) &&
+          !isSensitive(active);
+
+        const el = isFocusedInput
+          ? active
+          : window.__smartFillLastRightClicked || active;
         const tag = el?.tagName ? el.tagName.toLowerCase() : "";
         if (["input", "textarea", "select"].includes(tag) && !isSensitive(el)) {
           const key = `f_single_${Date.now()}`;

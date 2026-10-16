@@ -111,7 +111,10 @@ const MAX_CACHE_ENTRIES = 50;
 
 function getCacheKey(payload, mode) {
   const fieldSig = (payload.fields || [])
-    .map((f) => `${f.key}:${f.label}:${f.type}`)
+    .map(
+      (f) =>
+        `${f.name || f.id || f.label || "f"}:${f.label || ""}:${f.type || "text"}`,
+    )
     .join("|");
   return `${mode}:${payload.language || "en"}:${payload.hint || ""}:${payload.persona?.id || "none"}:${fieldSig}`;
 }
@@ -406,19 +409,27 @@ async function fetchDirectGroq(payload, apiKey, model) {
   return parsed;
 }
 
-// Smart token-saving orchestrator: 1m cache for full forms + zero-token persona match + fresh single-field fill
+// Smart token-saving orchestrator: 1m cache for single fields & full forms + zero-token persona match
 async function getSmartFillValues(payload, settings) {
   if (!payload.fields || payload.fields.length === 0) {
     return {};
   }
 
   const isSingleField = payload.fields.length === 1;
-  const cacheKey = isSingleField ? null : getCacheKey(payload, settings.mode);
+  const cacheKey = getCacheKey(payload, settings.mode);
 
-  // Use 1-minute cache ONLY for multi-field form fills (single-field always generates a fresh value)
-  if (!isSingleField && cacheKey) {
+  // 1-minute in-memory LRU cache hit (0 tokens for repeated fills within 60 seconds)
+  if (cacheKey) {
     const cached = responseCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      if (isSingleField) {
+        const currentKey = payload.fields[0].key;
+        const singleVal =
+          cached.values[currentKey] ?? Object.values(cached.values)[0];
+        return singleVal !== undefined
+          ? { [currentKey]: singleVal }
+          : cached.values;
+      }
       return cached.values;
     }
   }
@@ -452,7 +463,7 @@ async function getSmartFillValues(payload, settings) {
 
   const combined = { ...localValues, ...aiValues };
 
-  if (!isSingleField && cacheKey) {
+  if (cacheKey) {
     if (responseCache.size >= MAX_CACHE_ENTRIES) {
       const firstKey = responseCache.keys().next().value;
       responseCache.delete(firstKey);
@@ -504,7 +515,9 @@ async function executeFillProcess(tabId, singleTarget = false) {
     chrome.tabs
       .sendMessage(tabId, {
         type: "SHOW_TOAST",
-        text: "⚡ Smart Filler: Scanning & generating inputs...",
+        text: singleTarget
+          ? "⚡ Smart Filler: Generating value for this input..."
+          : "⚡ Smart Filler: Scanning & generating inputs...",
         variant: "loading",
         duration: 15000,
       })
@@ -523,7 +536,9 @@ async function executeFillProcess(tabId, singleTarget = false) {
       chrome.tabs
         .sendMessage(tabId, {
           type: "SHOW_TOAST",
-          text: "ℹ️ Smart Filler: No fillable form fields found.",
+          text: singleTarget
+            ? "ℹ️ Smart Filler: Please click inside an input field first."
+            : "ℹ️ Smart Filler: No fillable form fields found.",
           variant: "info",
           duration: 3000,
         })
@@ -571,7 +586,9 @@ async function executeFillProcess(tabId, singleTarget = false) {
       chrome.tabs
         .sendMessage(tabId, {
           type: "SHOW_TOAST",
-          text: `✅ Smart Filler: Filled ${filledCount} field${filledCount === 1 ? "" : "s"}!`,
+          text: singleTarget
+            ? "✅ Smart Filler: Filled active input!"
+            : `✅ Smart Filler: Filled ${filledCount} field${filledCount === 1 ? "" : "s"}!`,
           variant: "success",
           duration: 3000,
         })
@@ -646,9 +663,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
-// Shortcut command listener (Ctrl+Shift+F on Win/Linux, Alt+Shift+F / Option+Shift+F on Mac)
+// Shortcut command listener:
+// 1. fill-form: Entire Form (Ctrl+Shift+F on Win/Linux, Alt+Shift+F on Mac)
+// 2. fill-single-input: Single Input Only (Alt+Shift+I on Win/Linux, Alt+Shift+I on Mac)
 chrome.commands.onCommand.addListener(async (command, tab) => {
-  if (command === "fill-form") {
+  if (command === "fill-form" || command === "fill-single-input") {
     let targetTab = tab;
     if (!targetTab?.id) {
       const [activeTab] = await chrome.tabs.query({
@@ -676,6 +695,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
       return;
     }
 
-    await executeFillProcess(targetTab.id, false);
+    const isSingle = command === "fill-single-input";
+    await executeFillProcess(targetTab.id, isSingle);
   }
 });

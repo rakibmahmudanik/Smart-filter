@@ -34,6 +34,13 @@
         "mac": "Alt+Shift+F"
       },
       "description": "Fill current active form with Smart Filler"
+    },
+    "fill-single-input": {
+      "suggested_key": {
+        "default": "Alt+Shift+I",
+        "mac": "Alt+Shift+I"
+      },
+      "description": "Fill currently focused input field only"
     }
   },
   "content_scripts": [
