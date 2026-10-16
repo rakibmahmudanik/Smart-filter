@@ -2,14 +2,17 @@
 
 SmartFiller AI is an intelligent Chrome extension that fills out web forms in one click with realistic, context-aware mock data. No more typing repetitive test details manually.
 
+[![Download Latest Release](https://img.shields.io/badge/Download-SmartFiller%20v1.3.0%20(ZIP)-blue?style=for-the-badge&logo=googlechrome&logoColor=white)](https://github.com/rakibmahmudanik/Smart-filter/releases/download/v1.3.0/smart-filler-v1.3.0.zip)
+
 ---
 
 ## 🚀 Quick Install (Takes 30 Seconds)
 
-1. Open Chrome and navigate to `chrome://extensions`.
-2. Turn **ON** **Developer mode** in the top-right corner.
-3. Click **Load unpacked** (top-left) and select the **`extension`** folder.
-4. Pin **SmartFill AI** to your Chrome toolbar for quick access.
+1. **[Download SmartFiller v1.3.0 (.zip)](https://github.com/rakibmahmudanik/Smart-filter/releases/download/v1.3.0/smart-filler-v1.3.0.zip)** and extract/unzip it on your computer.
+2. Open Chrome and navigate to `chrome://extensions`.
+3. Turn **ON** **Developer mode** in the top-right corner.
+4. Click **Load unpacked** (top-left) and select the unzipped extension folder.
+5. Pin **SmartFiller AI** to your Chrome toolbar for quick access.
 
 ---
 
