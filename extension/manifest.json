@@ -31,7 +31,7 @@
     "fill-form": {
       "suggested_key": {
         "default": "Ctrl+Shift+F",
-        "mac": "Command+Shift+F"
+        "mac": "Alt+Shift+F"
       },
       "description": "Fill current active form with Smart Filler"
     }

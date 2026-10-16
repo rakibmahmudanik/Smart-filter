@@ -238,8 +238,8 @@ async function testDirectGroqKey(rawKey, preferredModel) {
   };
 }
 
-// Setup Right-Click Context Menus & refresh content scripts on open tabs
-chrome.runtime.onInstalled.addListener(async () => {
+// Setup Right-Click Context Menus cleanly without unauthorized tab scripting
+chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: "smartfill-root",
@@ -261,27 +261,6 @@ chrome.runtime.onInstalled.addListener(async () => {
       contexts: ["editable", "page"],
     });
   });
-
-  // Update content scripts in already-open tabs so user doesn't have to manually refresh tabs
-  try {
-    const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
-    for (const tab of tabs) {
-      if (tab.id) {
-        chrome.scripting
-          .executeScript({
-            target: { tabId: tab.id },
-            files: [
-              "content/formScanner.js",
-              "content/formFiller.js",
-              "content/content.js",
-            ],
-          })
-          .catch(() => {});
-      }
-    }
-  } catch {
-    // Ignore restricted tabs
-  }
 });
 
 async function fetchFromBackend(payload, serverUrl, token) {
@@ -487,15 +466,70 @@ async function getSmartFillValues(payload, settings) {
   return combined;
 }
 
-// Reusable fill executor with Local-Value merging
+// Ensure content scripts are active on the target tab
+async function ensureContentScriptInjected(tabId) {
+  try {
+    const res = await chrome.tabs
+      .sendMessage(tabId, { type: "PING" })
+      .catch(() => null);
+    if (res?.status === "ok") return true;
+
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: [
+        "content/formScanner.js",
+        "content/formFiller.js",
+        "content/content.js",
+      ],
+    });
+    // Brief tick to allow listeners to bind
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    return true;
+  } catch (err) {
+    console.warn(
+      "[Smart Filler] Content script injection skipped:",
+      err.message,
+    );
+    return false;
+  }
+}
+
+// Reusable fill executor with Local-Value merging & visual toasts
 async function executeFillProcess(tabId, singleTarget = false) {
   try {
+    const ready = await ensureContentScriptInjected(tabId);
+    if (!ready) return;
+
+    // Show loading status toast on page
+    chrome.tabs
+      .sendMessage(tabId, {
+        type: "SHOW_TOAST",
+        text: "⚡ Smart Filler: Scanning & generating inputs...",
+        variant: "loading",
+        duration: 15000,
+      })
+      .catch(() => {});
+
     const scanRes = await chrome.tabs.sendMessage(tabId, {
       type: "SCAN_FORM",
       singleTarget,
     });
 
-    if (!scanRes) return;
+    if (
+      !scanRes ||
+      ((!scanRes.fields || scanRes.fields.length === 0) &&
+        Object.keys(scanRes.localValues || {}).length === 0)
+    ) {
+      chrome.tabs
+        .sendMessage(tabId, {
+          type: "SHOW_TOAST",
+          text: "ℹ️ Smart Filler: No fillable form fields found.",
+          variant: "info",
+          duration: 3000,
+        })
+        .catch(() => {});
+      return;
+    }
 
     let finalValues = { ...(scanRes.localValues || {}) };
 
@@ -526,14 +560,42 @@ async function executeFillProcess(tabId, singleTarget = false) {
     }
 
     if (Object.keys(finalValues).length > 0) {
-      await chrome.tabs.sendMessage(tabId, {
+      const fillReport = await chrome.tabs.sendMessage(tabId, {
         type: "APPLY_FILL",
         values: finalValues,
         scope: "overwrite",
       });
+
+      const filledCount =
+        fillReport?.filled ?? Object.keys(finalValues).length;
+      chrome.tabs
+        .sendMessage(tabId, {
+          type: "SHOW_TOAST",
+          text: `✅ Smart Filler: Filled ${filledCount} field${filledCount === 1 ? "" : "s"}!`,
+          variant: "success",
+          duration: 3000,
+        })
+        .catch(() => {});
+    } else {
+      chrome.tabs
+        .sendMessage(tabId, {
+          type: "SHOW_TOAST",
+          text: "ℹ️ Smart Filler: No fields were modified.",
+          variant: "info",
+          duration: 3000,
+        })
+        .catch(() => {});
     }
   } catch (err) {
     console.error("[Smart Filler Error]", err);
+    chrome.tabs
+      .sendMessage(tabId, {
+        type: "SHOW_TOAST",
+        text: `❌ Smart Filler: ${err.message || "Failed to fill form"}`,
+        variant: "error",
+        duration: 4500,
+      })
+      .catch(() => {});
   }
 }
 
@@ -584,15 +646,36 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
-// Shortcut command listener (Ctrl+Shift+F)
-chrome.commands.onCommand.addListener(async (command) => {
+// Shortcut command listener (Ctrl+Shift+F on Win/Linux, Alt+Shift+F / Option+Shift+F on Mac)
+chrome.commands.onCommand.addListener(async (command, tab) => {
   if (command === "fill-form") {
-    const [tab] = await chrome.tabs.query({
-      active: true,
-      currentWindow: true,
-    });
-    if (tab?.id) {
-      executeFillProcess(tab.id, false);
+    let targetTab = tab;
+    if (!targetTab?.id) {
+      const [activeTab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      targetTab = activeTab;
     }
+
+    if (!targetTab?.id) return;
+
+    const url = targetTab.url || "";
+    if (
+      url.startsWith("chrome://") ||
+      url.startsWith("chrome-extension://") ||
+      url.startsWith("edge://") ||
+      url.startsWith("devtools://") ||
+      url.startsWith("about:") ||
+      url.includes("chromewebstore.google.com")
+    ) {
+      console.warn(
+        "[Smart Filler] Cannot run on restricted browser page:",
+        url,
+      );
+      return;
+    }
+
+    await executeFillProcess(targetTab.id, false);
   }
 });

@@ -84,6 +84,27 @@ hintInput.addEventListener("input", () => {
   saveSettings({ LAST_HINT: hintInput.value });
 });
 
+async function ensureContentScriptActive(tabId) {
+  try {
+    const res = await chrome.tabs
+      .sendMessage(tabId, { type: "PING" })
+      .catch(() => null);
+    if (res?.status === "ok") return;
+
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: [
+        "content/formScanner.js",
+        "content/formFiller.js",
+        "content/content.js",
+      ],
+    });
+    await new Promise((r) => setTimeout(r, 60));
+  } catch (err) {
+    console.warn("Script injection skipped:", err);
+  }
+}
+
 fillBtn.addEventListener("click", async () => {
   if (!activeTabId) return;
 
@@ -91,6 +112,7 @@ fillBtn.addEventListener("click", async () => {
   setStatus("Scanning webpage form...");
 
   try {
+    await ensureContentScriptActive(activeTabId);
     const scanResponse = await chrome.tabs.sendMessage(activeTabId, {
       type: "SCAN_FORM",
     });
@@ -153,6 +175,7 @@ fillBtn.addEventListener("click", async () => {
 undoBtn.addEventListener("click", async () => {
   if (!activeTabId) return;
   try {
+    await ensureContentScriptActive(activeTabId);
     const res = await chrome.tabs.sendMessage(activeTabId, {
       type: "UNDO_FILL",
     });
